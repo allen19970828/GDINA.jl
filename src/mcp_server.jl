@@ -31,13 +31,16 @@ function handle_tools_list(req)
         "tools" => [
             Dict(
                 "name" => "estimate_gdina",
-                "description" => "Estimate a Cognitive Diagnosis Model (CDM) using GDINA.jl. Takes paths to CSV files for response data and Q-matrix.",
+                "description" => "Estimate a Cognitive Diagnosis Model (CDM) using GDINA.jl. Takes paths to CSV files for response data and Q-matrix, and outputs estimation reports.",
                 "inputSchema" => Dict(
                     "type" => "object",
                     "properties" => Dict(
-                        "data_path" => Dict("type" => "string", "description" => "Absolute path to the response data CSV file (N examines x J items)."),
+                        "data_path" => Dict("type" => "string", "description" => "Absolute path to the response data CSV file (N examinees x J items)."),
                         "qmatrix_path" => Dict("type" => "string", "description" => "Absolute path to the Q-matrix CSV file (J items x K attributes)."),
-                        "model" => Dict("type" => "string", "description" => "Model type: GDINA, DINA, DINO, ACDM, LLM, RRUM. Default is GDINA.")
+                        "model" => Dict("type" => "string", "description" => "Model type: GDINA, DINA, DINO, ACDM, LLM, RRUM. Default is GDINA."),
+                        "method" => Dict("type" => "string", "description" => "Estimation method: EM or MCMC. Default is EM."),
+                        "has_header" => Dict("type" => "boolean", "description" => "Set to true if CSV files have headers (column names). Default is false."),
+                        "compute_se" => Dict("type" => "boolean", "description" => "Compute item parameter standard errors (only applicable for EM). Default is true.")
                     ),
                     "required" => ["data_path", "qmatrix_path"]
                 )
@@ -58,40 +61,100 @@ function handle_tools_call(req)
             model_str = get(args, "model", "GDINA")
             model_sym = Symbol(model_str)
             
-            # Read Data
-            df_data = CSV.read(data_path, DataFrame, header=false)
-            data_mat = Matrix(df_data)
+            method_str = get(args, "method", "EM")
+            method_sym = Symbol(method_str)
+            
+            has_header = get(args, "has_header", false)
+            compute_se = get(args, "compute_se", true)
+            
+            # Read Response Data
+            df_data = has_header ? CSV.read(data_path, DataFrame) : CSV.read(data_path, DataFrame, header=false)
+            data_mat = Matrix{Float64}(df_data)
             
             # Read Q-matrix
-            df_q = CSV.read(q_path, DataFrame, header=false)
-            q_mat = Matrix(df_q)
+            df_q = has_header ? CSV.read(q_path, DataFrame) : CSV.read(q_path, DataFrame, header=false)
+            q_mat = Matrix{Int}(df_q)
             
-            # Run GDINA
-            res = gdina(data_mat, q_mat, model=model_sym)
+            if method_sym == :MCMC
+                # Dynamically try to load Turing to activate the Package Extension
+                try
+                    @eval using Turing
+                catch e
+                    return Dict(
+                        "isError" => true,
+                        "content" => [
+                            Dict(
+                                "type" => "text",
+                                "text" => "MCMC method requested, but Turing.jl is not available. Please ensure Turing.jl is in your environment dependencies."
+                            )
+                        ]
+                    )
+                end
+            end
             
-            # Extract EAP/MAP
+            # Run GDINA Estimation
+            res = gdina(data_mat, q_mat; model=model_sym, method=method_sym)
+            
+            # Extract Latent Profiles
             eap = person_eap(res)
             map_prof = person_map(res)
             
-            # Create text response
+            # Build Item Parameters Table
+            item_table = "### Item Parameters & Delta Estimates\n\n| Item | Parameter | Estimate (Delta) |"
+            if method_sym == :EM && compute_se
+                se_delta = standard_error(res, data_mat)
+                item_table *= " Standard Error |\n| :--- | :--- | :--- | :--- |\n"
+                for j in 1:res.nitems
+                    delta_j = res.item_params.delta[j]
+                    se_j = se_delta[j]
+                    for p in 1:length(delta_j)
+                        param_name = p == 1 ? "d0 (Base)" : "d$(p-1)"
+                        item_table *= "| Item $j | $param_name | $(round(delta_j[p], digits=4)) | $(round(se_j[p], digits=4)) |\n"
+                    end
+                end
+            else
+                item_table *= "\n| :--- | :--- | :--- |\n"
+                for j in 1:res.nitems
+                    delta_j = res.item_params.delta[j]
+                    for p in 1:length(delta_j)
+                        param_name = p == 1 ? "d0 (Base)" : "d$(p-1)"
+                        item_table *= "| Item $j | $param_name | $(round(delta_j[p], digits=4)) |\n"
+                    end
+                end
+            end
+            
+            # Create full report in markdown
             summary = """
-            GDINA Estimation Completed Successfully!
+            ## GDINA.jl Estimation Report
             
-            Model: $model_str
-            Number of Examinees: $(res.npersons)
-            Number of Items: $(res.nitems)
-            Number of Attributes: $(res.Q.natt)
+            *   **Model Type:** `$model_str`
+            *   **Estimation Method:** `$method_str`
+            *   **Number of Examinees (N):** $(res.npersons)
+            *   **Number of Items (J):** $(res.nitems)
+            *   **Number of Latent Attributes (K):** $(res.Q.natt)
             
-            Fit Statistics:
-            - Log-Likelihood: $(round(res.loglik, digits=4))
-            - Deviance: $(round(res.deviance, digits=4))
-            - AIC: $(round(res.AIC, digits=4))
-            - BIC: $(round(res.BIC, digits=4))
-            - Free Parameters: $(res.npar)
+            ### Fit Statistics (Information Criteria)
+            *   **Log-Likelihood:** $(round(res.loglik, digits=4))
+            *   **Deviance:** $(round(res.deviance, digits=4))
+            *   **AIC:** $(round(res.AIC, digits=4))
+            *   **BIC:** $(round(res.BIC, digits=4))
+            *   **Free Parameters (df):** $(res.npar)
+            *   **Estimation Converged:** $(res.converged ? "Yes" : "No") (in $(res.n_iter) iterations)
             
-            Examinees MAP Profiles (First 5):
-            $(map_prof[1:min(5, end), :])
+            $item_table
+            
+            ### Latent Attribute Profile Classification (MAP)
+            *Showing classification for first 5 examinees:*
             """
+            
+            # Format MAP as markdown table
+            map_table = "\n| Examinee | " * join(["Attribute $k" for k in 1:res.Q.natt], " | ") * " |\n"
+            map_table *= "| :--- | " * join([":---" for k in 1:res.Q.natt], " | ") * " |\n"
+            for i in 1:min(5, res.npersons)
+                map_table *= "| Examinee $i | " * join([string(map_prof[i, k]) for k in 1:res.Q.natt], " | ") * " |\n"
+            end
+            
+            summary *= map_table
             
             return Dict(
                 "content" => [
@@ -112,7 +175,7 @@ function handle_tools_call(req)
                 ]
             )
         end
-    else
+    ) else
         return Dict(
             "isError" => true,
             "content" => [
