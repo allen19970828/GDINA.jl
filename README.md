@@ -111,30 +111,52 @@ println("Posterior Estimates: ", model_mcmc.posterior_means)
 
 ---
 
-## 🤖 AI Agent Integration: Run the MCP Server
+## 🤖 AI Agent Integration: Local MCP Server Deployment
 
-To run the MCP server locally and allow IDEs like Cursor or Claude Desktop to use `GDINA.jl` to analyze files on your behalf:
+`GDINA.jl` features a built-in Model Context Protocol (MCP) server that allows AI agents (like Claude Desktop or Cursor) to directly invoke the package as a native tool, running statistical estimations and data analyses on your behalf.
 
-1. Launch the server script:
-   ```bash
-   julia --project=@. src/mcp_server.jl
-   ```
+### 1. Prerequisite: Instantiate the Environment
+Make sure all dependencies (like `JSON3`, `CSV`, and `DataFrames`) are fully instantiated for the MCP project:
+```bash
+julia --project=@. -e 'using Pkg; Pkg.instantiate()'
+```
 
-2. Add the server configuration to your Claude Desktop config file (usually `~/Library/Application Support/Claude/claude_desktop_config.json`):
-   ```json
-   {
-     "mcpServers": {
-       "gdina-jl": {
-         "command": "julia",
-         "args": [
-           "--project=/absolute/path/to/GDINA.jl",
-           "/absolute/path/to/GDINA.jl/src/mcp_server.jl"
-         ]
-       }
-     }
-   }
-   ```
-Now you can prompt your AI assistant: *"Analyze the student response CSV using the local GDINA server and write a cognitive diagnosis report."*
+### 2. Connect to Claude Desktop
+To integrate the server with **Claude Desktop**, open your configuration file:
+*   **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+*   **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add the `gdina-jl` server configuration under the `mcpServers` block (be sure to replace `/absolute/path/to/GDINA.jl` with the actual absolute path to your cloned repository):
+```json
+{
+  "mcpServers": {
+    "gdina-jl": {
+      "command": "julia",
+      "args": [
+        "--project=/absolute/path/to/GDINA.jl",
+        "/absolute/path/to/GDINA.jl/src/mcp_server.jl"
+      ]
+    }
+  }
+}
+```
+Restart Claude Desktop to apply changes.
+
+### 3. Connect to Cursor IDE
+To integrate the server with **Cursor**:
+1. Open Cursor and navigate to **Settings** ➡️ **Features** ➡️ **MCP**.
+2. Click **+ Add New MCP Server**.
+3. Set the configuration details:
+   *   **Name**: `gdina-jl`
+   *   **Type**: `stdio`
+   *   **Command**: `julia --project=/absolute/path/to/GDINA.jl /absolute/path/to/GDINA.jl/src/mcp_server.jl` (replace with your actual absolute path)
+4. Click **Save**. The status indicator should turn green!
+
+### 4. How to Use & Prompt Examples
+Once connected, you can simply feed CSV files to your AI assistant and prompt it directly. For example:
+> "Please analyze the student response CSV at `/absolute/path/to/responses.csv` and the Q-matrix at `/absolute/path/to/qmatrix.csv` using the local `gdina-jl` MCP server. Fit a DINA model and write a detailed psychometric diagnostic report."
+
+The AI agent will call your local Julia engine automatically, compute model fits, estimate item parameters (with exact Louis standard errors), classify student latent profiles, and output a beautifully formatted markdown report!
 
 ---
 

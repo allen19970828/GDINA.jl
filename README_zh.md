@@ -115,27 +115,52 @@ println("Bayesian Posterior Estimates: ", model_mcmc.posterior_means)
 
 ---
 
-## 🤖 AI Agent 整合：啟動 MCP 伺服器
+## 🤖 AI Agent 整合：本地端 MCP 伺服器部署與使用手冊
 
-`GDINA.jl` 專為 AI 輔助工作流設計。若要啟動 MCP 伺服器，讓 Cursor 或 Claude 能自動呼叫此套件分析資料：
+`GDINA.jl` 內建了標準的 Model Context Protocol (MCP) 伺服器，能讓您的 AI 助手（如 Claude Desktop 或 Cursor IDE）直接將本套件作為本地工具呼叫，自動為您進行統計模型估計與數據分析！
 
-1. 在終端機執行啟動腳本：
-   ```bash
-   julia --project=@. src/mcp_server.jl
-   ```
+### 1. 準備工作：初始化環境依賴
+在首次執行 MCP 伺服器前，請確保套件的依賴（如 `JSON3`、`CSV`、`DataFrames`）已在本機環境中完整下載與初始化：
+```bash
+julia --project=@. -e 'using Pkg; Pkg.instantiate()'
+```
 
-2. 在您的 IDE (如 Cursor) 或 Claude Desktop 設定檔中加入此 MCP 伺服器：
-   ```json
-   {
-     "mcpServers": {
-       "gdina-jl": {
-         "command": "julia",
-         "args": ["--project=/absolute/path/to/GDINA.jl", "/absolute/path/to/GDINA.jl/src/mcp_server.jl"]
-       }
-     }
-   }
-   ```
-之後，您就可以在聊天框中對 AI 說：**「幫我用本地的 GDINA 伺服器分析這份學生作答 CSV 檔，並產出一份診斷報告。」** AI 將會自動呼叫套件並完成分析！
+### 2. 對接 Claude Desktop
+若要將伺服器整合至 **Claude Desktop**，請開啟您的設定檔：
+*   **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+*   **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+在 `mcpServers` 區塊下加入 `gdina-jl` 的配置（請務必將 `/absolute/path/to/GDINA.jl` 替換為您本機中該專案的**絕對路徑**）：
+```json
+{
+  "mcpServers": {
+    "gdina-jl": {
+      "command": "julia",
+      "args": [
+        "--project=/absolute/path/to/GDINA.jl",
+        "/absolute/path/to/GDINA.jl/src/mcp_server.jl"
+      ]
+    }
+  }
+}
+```
+儲存後，重新啟動 Claude Desktop 即可生效。
+
+### 3. 對接 Cursor IDE（強力推薦！）
+若要整合至 **Cursor** 編輯器中：
+1. 開啟 Cursor，點選右上角的 **Settings** ➡️ **Features** ➡️ **MCP**。
+2. 點選 **+ Add New MCP Server**。
+3. 填入以下配置：
+   *   **Name**: `gdina-jl`
+   *   **Type**: `stdio`
+   *   **Command**: `julia --project=/absolute/path/to/GDINA.jl /absolute/path/to/GDINA.jl/src/mcp_server.jl` （請將路徑替換為您的本機絕對路徑）
+4. 點選 **Save** 儲存。此時狀態燈應會顯示綠色，代表連線成功！
+
+### 4. 使用方式與提示詞 (Prompt) 範例
+連線成功後，您不需要手動啟動伺服器。當您在與 AI 對話時，只要直接把 CSV 檔案丟給它，並輸入以下指令即可：
+> 「請幫我用本地的 `gdina-jl` MCP 伺服器，分析路徑在 `/absolute/path/to/responses.csv` 的學生作答反應檔，以及在 `/absolute/path/to/qmatrix.csv` 的 Q-矩陣。擬合一個 DINA 模型，並為我寫一份詳細的心理計量診斷報告。」
+
+AI 助理收到後，會自動在背景啟動您的 Julia 引擎，估計項目參數（包含精準的 Louis 標準誤）、計算擬合指標，並自動將分析結果排版成精美的 Markdown 表格呈現給您！
 
 ---
 
