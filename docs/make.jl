@@ -16,3 +16,9 @@ makedocs(
         "API Reference" => "api.md"
     ]
 )
+
+deploydocs(
+    repo = "github.com/allen19970828/GDINA.jl.git",
+    devbranch = "main",
+)
+
